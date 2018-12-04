@@ -1,0 +1,24 @@
+{
+    "name": "yyliziqiu/jwt-auth",
+    "description": "JSON Web Token Authentication for yii2",
+    "type": "library",
+    "keywords": [
+        "jwt"
+    ],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "yyliziqiu"
+        }
+    ],
+    "require": {
+        "php": ">=5.4.0"
+    },
+    "require-dev": {
+    },
+    "autoload": {
+        "psr-4": {
+            "JwtAuth\\": "src/"
+        }
+    }
+}
