@@ -5,15 +5,17 @@ namespace JwtAuth\Exceptions;
 class JwtException extends \Exception
 {
     /**
-     * @var int
+     * @var int http状态码
      */
     protected $statusCode = 500;
 
     /**
+     * JwtException constructor.
+     *
      * @param string $message
-     * @param int $statusCode
+     * @param null|int $statusCode
      */
-    public function __construct($message = 'An error occurred', $statusCode = null)
+    public function __construct($message = 'An error occurred!', $statusCode = null)
     {
         parent::__construct($message);
 
@@ -31,7 +33,7 @@ class JwtException extends \Exception
     }
 
     /**
-     * @return int the status code
+     * @return int
      */
     public function getStatusCode()
     {

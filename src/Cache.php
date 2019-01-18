@@ -4,14 +4,14 @@ namespace JwtAuth;
 
 use Yii;
 
-class BaseList
+abstract class Cache
 {
     /**
-     * 设置缓存,数据类型为字符串
+     * 设置缓存
      *
      * @param string $key
-     * @param mixed $value
-     * @param int $expire 单位：秒
+     * @param array $value
+     * @param null|int $expire
      */
     public static function set($key, $value = [], $expire = null)
     {
@@ -19,10 +19,11 @@ class BaseList
     }
 
     /**
-     * 获取缓存内容
+     * 获取缓存
+     * 缓存未命中返回bool值false，所以请不要把false作为缓存内容。这个地方一定要注意
      *
      * @param string $key
-     * @return bool|mixed 未命中缓存返回false
+     * @return mixed
      */
     public static function get($key)
     {
@@ -45,8 +46,5 @@ class BaseList
      * @param string $key
      * @return string
      */
-    public static function serializeKey($key)
-    {
-        return $key;
-    }
+    public abstract static function serializeKey($key);
 }

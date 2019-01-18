@@ -14,7 +14,7 @@ class AuthFilter extends ActionFilter
     public function beforeAction($action)
     {
         Yii::$app->jwtManager->parseToken(null, true);
-        
+
         return true;
     }
 }

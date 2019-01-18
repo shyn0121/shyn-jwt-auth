@@ -4,69 +4,71 @@ namespace JwtAuth;
 
 use Yii;
 use yii\base\Component;
-use yii\base\UnknownMethodException;
-use yii\base\UnknownPropertyException;
 use JwtAuth\Exceptions\TokenExpiredException;
 use JwtAuth\Exceptions\TokenInvalidException;
+use JwtAuth\Exceptions\SegmentErrorException;
+use JwtAuth\Exceptions\UserUnauthorizedException;
+use JwtAuth\Exceptions\UserNotFoundException;
+use JwtAuth\Exceptions\UnknownPropertyException;
 
 class Manager extends Component
 {
     /**
      * @var bool 开启黑名单机制
      */
-    private $black_list_enable = false;
+    public $blacklistEnable = false;
 
     /**
      * @var bool 开启白名单机制
      */
-    private $white_list_enable = false;
+    public $whitelistEnable = false;
 
     /**
      * @var string 用户认证类路径
      */
-    private $identify_class;
+    public $userClass;
 
     /**
      * @var string 加密算法
      */
-    private $alg = 'sha256';
+    public $alg = 'sha256';
 
     /**
      * @var string 加密秘钥
      */
-    private $salt;
+    public $salt;
 
     /**
      * @var int token过期时间 单位：秒
      */
-    private $ttl = 86400;
+    public $ttl = 86400;
 
     /**
      * @var int token刷新过期时间 单位：秒
      */
-    private $refresh_ttl = 2592000;
+    public $refreshTtl = 2592000;
 
     /**
      * @var int token开始使用时间 单位：秒
      */
-    private $wait_ttl = 0;
+    public $waitTtl = 0;
 
     /**
-     * @var \yii\caching\Cache
+     * @var \yii\caching\Cache 缓存驱动
      */
-    private $cache;
+    public $cache;
 
     /**
      * @var Auth
      */
-    private $_auth = null;
+    private $auth = null;
 
     /**
      * Manager constructor.
+     *
      * @param array $config
-     * @throws \yii\base\InvalidConfigException
      */
-    public function __construct(array $config = [])
+    public function __construct($config = [])
     {
         parent::__construct($config);
 
@@ -74,345 +76,15 @@ class Manager extends Component
     }
 
     /**
-     * @param string $name
-     * @return mixed
-     */
-    public function __get($name)
-    {
-        try {
-            return parent::__get($name);
-        } catch (UnknownPropertyException $ex) {
-            return $this->auth->$name;
-        }
-    }
-
-    /**
-     * @param string $name
-     * @param mixed $value
-     */
-    public function __set($name, $value)
-    {
-        try {
-            parent::__set($name, $value);
-        } catch (UnknownPropertyException $ex) {
-            $this->auth->$name = $value;
-        }
-    }
-
-    /**
+     * 调用Auth方法
+     *
      * @param string $name
      * @param array $params
      * @return mixed
      */
     public function __call($name, $params)
     {
-        try {
-            return parent::__call($name, $params);
-        } catch (UnknownMethodException $ex) {
-            return call_user_func_array([$this->auth, $name], $params);
-        }
-    }
-
-    /**
-     * 生成token
-     *
-     * @return string
-     */
-    public function createToken()
-    {
-        $identify = $this->login();
-
-        $jwt = $this->genJwtByIdentify($identify);
-
-        $this->registerToken($jwt->token);
-        $this->addTokenToWhiteList($jwt, $identify->content);
-        $this->addTokenToResponse();
-
-        return $this->token;
-    }
-
-    /**
-     * 验证token，并返回认证的用户
-     *
-     * @param null|string $token
-     * @param bool $auto_refresh
-     * @return IdentityInterface
-     * @throws TokenExpiredException
-     * @throws TokenInvalidException
-     */
-    public function parseToken($token = null, $auto_refresh = false)
-    {
-        if (isset($token) && is_string($token)) {
-            $this->registerToken($token);
-        }
-
-        $jwt = $this->genJwt();
-        try {
-            $jwt->parseToken($this->token, $this->refresh_ttl);
-        } catch (TokenExpiredException $exception) {
-            if ($auto_refresh) {
-                $this->refreshToken($jwt);
-                return $this->identify;
-            }
-            throw $exception;
-        }
-
-        $content = $this->verifyTokenInList($jwt);
-        $identify = $this->configureIdentityById($jwt->sub, $jwt->customClaims, $content);
-
-        return $identify;
-    }
-
-    /**
-     * 刷新token
-     *
-     * @param null|string|Jwt $token
-     * @return string
-     * @throws TokenInvalidException
-     */
-    public function refreshToken($token = null)
-    {
-        if (isset($token) && is_string($token)) {
-            $this->registerToken($token);
-        }
-        if (isset($token) && $token instanceof Jwt) {
-            $jwt = $token;
-        } else {
-            $jwt = $this->genJwt();
-            $jwt->parseRefreshToken($this->token, $this->refresh_ttl);
-        }
-
-        $content = $this->verifyTokenInList($jwt);
-        $this->changeListOnRemoveToken($jwt);
-
-        $this->refreshJwt($jwt);
-        $this->registerToken($jwt->token);
-
-        $this->addTokenToWhiteList($jwt, $content);
-        $this->configureIdentityById($jwt->sub, $jwt->customClaims, $content);
-        $this->addTokenToResponse();
-
-        return $this->token;
-    }
-
-    /**
-     * 注销token
-     *
-     * @param null|string $token
-     */
-    public function invalidateToken($token = null)
-    {
-        if (isset($token) && is_string($token)) {
-            $this->registerToken($token);
-        }
-
-        $jwt = $this->genJwt();
-        try {
-            $jwt->parseToken($this->token, $this->refresh_ttl);
-        } catch (\Exception $exception) {
-            if (!($exception instanceof TokenExpiredException)) {
-                return;
-            }
-        }
-        $this->changeListOnRemoveToken($jwt);
-        $this->removeTokenFromResponse();
-    }
-
-    /**
-     * 注册token到manager
-     *
-     * @param string $token
-     */
-    private function registerToken($token)
-    {
-        $this->token = $token;
-    }
-
-    /**
-     * 添加token到黑名单
-     *
-     * @param Jwt $jwt
-     */
-    private function addTokenToBlackList($jwt)
-    {
-        if ($this->black_list_enable) {
-            BlackList::set($jwt->jti, [], $this->genExpiredTime($jwt));
-        }
-    }
-
-    /**
-     * 添加token到白名单
-     *
-     * @param Jwt $jwt
-     * @param array $content
-     */
-    private function addTokenToWhiteList($jwt, $content)
-    {
-        if ($this->white_list_enable) {
-            WhiteList::set($jwt->jti, isset($content) ? $content : [], $this->genExpiredTime($jwt));
-        }
-    }
-
-    /**
-     * 从白名单中移除token
-     *
-     * @param Jwt $jwt
-     */
-    private function removeTokenFromWhiteList($jwt)
-    {
-        if ($this->white_list_enable) {
-            WhiteList::delete($jwt->jti);
-        }
-    }
-
-    /**
-     * 删除token时，把该token添加到黑名单，并从白名单中移除
-     *
-     * @param Jwt $jwt
-     */
-    private function changeListOnRemoveToken($jwt)
-    {
-        $this->addTokenToBlackList($jwt);
-        $this->removeTokenFromWhiteList($jwt);
-    }
-
-    /**
-     * 检测token是否通过黑白名单验证
-     *
-     * @param Jwt $jwt
-     * @return mixed
-     * @throws TokenInvalidException
-     */
-    private function verifyTokenInList($jwt)
-    {
-        if ($this->black_list_enable) {
-            $value = BlackList::get($jwt->jti);
-            if ($value !== false) {
-                throw new TokenInvalidException('Token is unavailable in blacklist!');
-            }
-        }
-
-        if ($this->white_list_enable) {
-            $value = WhiteList::get($jwt->jti);
-            if ($value === false) {
-                throw new TokenInvalidException('Token is unavailable in whitelist!');
-            }
-            return $value;
-        }
-        return [];
-    }
-
-    /**
-     * @return Auth
-     */
-    public function getAuth()
-    {
-        if (!isset($this->_auth)) {
-            $this->_auth = new Auth();
-        }
-        return $this->_auth;
-    }
-
-    /**
-     * @param int|string $sub
-     * @return array
-     */
-    private function genClaims($sub)
-    {
-        return [
-            'iss' => PayLoad::genIss(),
-            'aud' => PayLoad::genAud(),
-            'exp' => PayLoad::genExp($this->ttl),
-            'nbf' => PayLoad::genNbf($this->wait_ttl),
-            'iat' => PayLoad::genIat(),
-            'jti' => PayLoad::genJti(),
-            'sub' => (string)$sub
-        ];
-    }
-
-    /**
-     * @return array
-     */
-    private function genHeadSegments()
-    {
-        return ['type' => 'jwt', 'alg' => $this->alg];
-    }
-
-    /**
-     * @param Head $head
-     * @param PayLoad $payload
-     * @return array
-     */
-    private function genJwtSegments($head, $payload)
-    {
-        return ['head' => $head, 'payload' => $payload];
-    }
-
-    /**
-     * @param IdentityInterface $identify
-     * @return Jwt
-     */
-    private function genJwtByIdentify($identify)
-    {
-        $head = $this->genHead();
-        $head->attributes = $this->genHeadSegments();
-
-        $payload = $this->genPayLoad($identify->customClaims);
-        $payload->attributes = $this->genClaims($identify->getId());
-
-        $jwt = $this->genJwt();
-        $jwt->attributes = $this->genJwtSegments($head, $payload);
-
-        return $jwt;
-    }
-
-    /**
-     * @return Head
-     */
-    private function genHead()
-    {
-        return new Head();
-    }
-
-    /**
-     * @param array $custom_claims
-     * @return PayLoad
-     */
-    private function genPayLoad($custom_claims)
-    {
-        return new PayLoad($custom_claims);
-    }
-
-    /**
-     * @return Jwt
-     */
-    private function genJwt()
-    {
-        return new Jwt($this->salt);
-    }
-
-    /**
-     * @param Jwt $jwt
-     * @return int
-     */
-    private function genExpiredTime($jwt)
-    {
-        return Timer::secondsTo($jwt->iat) + $this->refresh_ttl;
-    }
-
-    /**
-     * @param Jwt $jwt
-     * @return string
-     * @throws Exception\InvalidSegmentException
-     */
-    private function refreshJwt($jwt)
-    {
-        $jwt->exp = PayLoad::genExp($this->ttl);
-        $jwt->nbf = PayLoad::genNbf($this->wait_ttl);
-        $jwt->iat = PayLoad::genIat();
-        $jwt->jti = PayLoad::genJti();
-
-        return $jwt->refresh();
+        return call_user_func_array([$this->auth(), $name], $params);
     }
 
     /**
@@ -432,146 +104,273 @@ class Manager extends Component
     }
 
     /**
-     * @return bool
-     */
-    public function getBlackListEnable()
-    {
-        return $this->black_list_enable;
-    }
-
-    /**
-     * @param bool $black_list_enable
-     */
-    public function setBlackListEnable($black_list_enable)
-    {
-        $this->black_list_enable = $black_list_enable;
-    }
-
-    /**
-     * @return bool
-     */
-    public function getWhiteListEnable()
-    {
-        return $this->white_list_enable;
-    }
-
-    /**
-     * @param bool $white_list_enable
-     */
-    public function setWhiteListEnable($white_list_enable)
-    {
-        $this->white_list_enable = $white_list_enable;
-    }
-
-    /**
+     * 生成token
+     *
      * @return string
+     * @throws UserUnauthorizedException
      */
-    public function getIdentifyClass()
+    public function createToken()
     {
-        return $this->identify_class;
+        $auth = $this->auth();
+        $user = $auth->login();
+
+        $jwt = $this->genJwtByUser($user);
+
+        $this->registerToken($jwt->encode());
+        $this->addTokenToWhitelist($jwt, $user->genContent());
+        $auth->addTokenToResponse();
+
+        return $auth->token;
     }
 
     /**
-     * @param string $identify_class
+     * 验证token，并返回认证的用户实例
+     *
+     * @param null|string $token
+     * @param bool $autoRefresh token过期是否自动刷新
+     * @return UserAuthInterface
+     * @throws UserNotFoundException
+     * @throws UserUnauthorizedException
+     * @throws TokenExpiredException
+     * @throws TokenInvalidException
      */
-    public function setIdentifyClass($identify_class)
+    public function parseToken($token = null, $autoRefresh = false)
     {
-        $this->identify_class = $identify_class;
+        $auth = $this->auth();
+
+        if (isset($token) && is_string($token)) {
+            $this->registerToken($token);
+        }
+
+        $jwt = $this->genJwt();
+        try {
+            $jwt->parseToken($auth->token(), $this->refreshTtl);
+        } catch (TokenExpiredException $ex) {
+            if ($autoRefresh) {
+                $this->refreshToken($jwt);
+                return $auth->user();
+            }
+            throw $ex;
+        }
+        $content = $this->verifyTokenInList($jwt);
+
+        return $auth->configureUserById($jwt->payload->sub, $jwt->payload->customClaims, $content);
     }
 
     /**
+     * 刷新token
+     *
+     * @param null|string $token
      * @return string
+     * @throws UserNotFoundException
+     * @throws TokenInvalidException
      */
-    public function getAlg()
+    public function refreshToken($token = null)
     {
-        return $this->alg;
+        $auth = $this->auth();
+
+        if (isset($token) && is_string($token)) {
+            $this->registerToken($token);
+        }
+        if (isset($token) && $token instanceof Jwt) {
+            $jwt = $token;
+        } else {
+            $jwt = $this->genJwt();
+            $jwt->parseRefreshToken($auth->token(), $this->refreshTtl);
+        }
+
+        $content = $this->verifyTokenInList($jwt);
+        $this->changeListOnRemoveToken($jwt);
+
+        $this->registerToken($this->refreshJwt($jwt));
+        $this->addTokenToWhitelist($jwt, $content);
+        $auth->configureUserById($jwt->payload->sub, $jwt->payload->customClaims, $content);
+        $auth->addTokenToResponse();
+
+        return $auth->token();
     }
 
     /**
-     * @param string $alg
+     * 注销token
+     *
+     * @param null|string $token
      */
-    public function setAlg($alg)
+    public function invalidateToken($token = null)
     {
-        $this->alg = $alg;
+        $auth = $this->auth();
+
+        if (isset($token) && is_string($token)) {
+            $this->registerToken($token);
+        }
+
+        $jwt = $this->genJwt();
+        try {
+            $jwt->parseToken($auth->token(), $this->refreshTtl);
+        } catch (\Exception $ex) {
+            if (!($ex instanceof TokenExpiredException)) {
+                return;
+            }
+        }
+        $this->changeListOnRemoveToken($jwt);
+        $auth->removeTokenFromResponse();
     }
 
     /**
+     * 注册token到应用
+     *
+     * @param string $token
+     */
+    private function registerToken($token)
+    {
+        $this->auth()->token = $token;
+    }
+
+    /**
+     * 添加token到黑名单
+     *
+     * @param Jwt $jwt
+     */
+    private function addTokenToBlacklist($jwt)
+    {
+        if ($this->blacklistEnable) {
+            Blacklist::set($jwt->payload->jti, [], $this->genExpiredTime($jwt));
+        }
+    }
+
+    /**
+     * 添加token到白名单
+     *
+     * @param Jwt $jwt
+     * @param array $content
+     */
+    private function addTokenToWhitelist($jwt, $content)
+    {
+        if ($this->whitelistEnable) {
+            Whitelist::set($jwt->payload->jti, is_array($content) ? $content : [], $this->genExpiredTime($jwt));
+        }
+    }
+
+    /**
+     * 从白名单中移除token
+     *
+     * @param Jwt $jwt
+     */
+    private function removeTokenFromWhitelist($jwt)
+    {
+        if ($this->whitelistEnable) {
+            Whitelist::delete($jwt->payload->jti);
+        }
+    }
+
+    /**
+     * 删除token时，把该token添加到黑名单，并从白名单中移除
+     *
+     * @param Jwt $jwt
+     */
+    private function changeListOnRemoveToken($jwt)
+    {
+        $this->addTokenToBlacklist($jwt);
+        $this->removeTokenFromWhitelist($jwt);
+    }
+
+    /**
+     * 检测token是否通过黑白名单验证
+     *
+     * @param Jwt $jwt
+     * @return array
+     * @throws TokenInvalidException
+     */
+    private function verifyTokenInList($jwt)
+    {
+        if ($this->blacklistEnable) {
+            $value = Blacklist::get($jwt->payload->jti);
+            if ($value !== false) {
+                throw new TokenInvalidException('Token in blacklist!');
+            }
+        }
+
+        if ($this->whitelistEnable) {
+            $value = Whitelist::get($jwt->payload->jti);
+            if ($value === false) {
+                throw new TokenInvalidException('Token not in whitelist!');
+            }
+            return $value;
+        }
+
+        return [];
+    }
+
+    /**
+     * 刷新jwt
+     *
+     * @param Jwt $jwt
      * @return string
+     * @throws SegmentErrorException
      */
-    public function getSalt()
+    private function refreshJwt($jwt)
     {
-        return $this->salt;
+        $jwt->payload->exp = Payload::genExp($this->ttl);
+        $jwt->payload->nbf = Payload::genNbf($this->waitTtl);
+        $jwt->payload->iat = Payload::genIat();
+        $jwt->payload->jti = Payload::genJti();
+
+        return $jwt->encode(true);
     }
 
     /**
-     * @param string $salt
+     * 通过用户实例生成Jwt实例
+     *
+     * @param UserAuthInterface $user
+     * @return Jwt
+     * @throws SegmentErrorException
      */
-    public function setSalt($salt)
+    private function genJwtByUser($user)
     {
-        $this->salt = $salt;
+        $head = new Head();
+        $head->configure(['type' => 'jwt', 'alg' => $this->alg]);
+
+        $payload = new Payload($user->genCustomClaims());
+        $payload->configure([
+            'iss' => Payload::genIss(),
+            'aud' => Payload::genAud(),
+            'exp' => Payload::genExp($this->ttl),
+            'nbf' => Payload::genNbf($this->waitTtl),
+            'iat' => Payload::genIat(),
+            'jti' => Payload::genJti(),
+            'sub' => $user->getId()
+        ]);
+
+        $jwt = $this->genJwt();
+        $jwt->configure(['head' => $head, 'payload' => $payload]);
+
+        return $jwt;
     }
 
     /**
+     * @return Jwt
+     */
+    private function genJwt()
+    {
+        return new Jwt($this->salt);
+    }
+
+    /**
+     * @param Jwt $jwt
      * @return int
      */
-    public function getTtl()
+    private function genExpiredTime($jwt)
     {
-        return $this->ttl;
+        return Timer::secondsTo($jwt->payload->iat) + $this->refreshTtl;
     }
 
     /**
-     * @param int $ttl
+     * @return Auth
      */
-    public function setTtl($ttl)
+    public function auth()
     {
-        $this->ttl = $ttl;
-    }
-
-    /**
-     * @return int
-     */
-    public function getRefreshTtl()
-    {
-        return $this->refresh_ttl;
-    }
-
-    /**
-     * @param int $refresh_ttl
-     */
-    public function setRefreshTtl($refresh_ttl)
-    {
-        $this->refresh_ttl = $refresh_ttl;
-    }
-
-    /**
-     * @return int
-     */
-    public function getWaitTtl()
-    {
-        return $this->wait_ttl;
-    }
-
-    /**
-     * @param int $wait_ttl
-     */
-    public function setWaitTtl($wait_ttl)
-    {
-        $this->wait_ttl = $wait_ttl;
-    }
-
-    /**
-     * @return \yii\caching\Cache
-     */
-    public function getCache()
-    {
-        return $this->cache;
-    }
-
-    /**
-     * @param \yii\caching\Cache $cache
-     */
-    public function setCache($cache)
-    {
-        $this->cache = $cache;
+        if (!isset($this->auth)) {
+            $this->auth = new Auth();
+        }
+        return $this->auth;
     }
 }

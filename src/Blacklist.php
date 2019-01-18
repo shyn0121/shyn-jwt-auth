@@ -2,12 +2,12 @@
 
 namespace JwtAuth;
 
-class BlackList extends BaseList
+class Blacklist extends Cache
 {
     /**
      * 缓存键值前缀
      */
-    const BLACK_LIST_PREFIX = 'jwt-bl-';
+    const BLACK_LIST_PREFIX = 'jwt-blacklist-';
 
     /**
      * 序列化key值

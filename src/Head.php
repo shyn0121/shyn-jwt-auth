@@ -2,151 +2,79 @@
 
 namespace JwtAuth;
 
-use Yii;
+use JwtAuth\Exceptions\SegmentErrorException;
 use JwtAuth\Exceptions\TokenInvalidException;
-use JwtAuth\Exceptions\InvalidSegmentException;
 
-class Head extends BaseModel
+class Head extends Segment
 {
     /**
-     * @var string token类型，值为‘jwt’
+     * @var string token类型
      */
     public $type;
 
     /**
-     * @var string token签名算法，默认为sha256
+     * @var string token签名算法
      */
     public $alg;
 
     /**
-     * @var null|string base64编码后的头部
+     * @var string base64编码后的头部
      */
-    private $encode_head = null;
+    private $encodeHead = null;
 
     /**
-     * @return null|string
-     */
-    public function __toString()
-    {
-        return $this->encodeHead;
-    }
-
-    /**
-     * @return array
-     */
-    public function rules()
-    {
-        return [
-            [['type', 'alg'], 'required'],
-            ['type', 'validateType'],
-            ['alg', 'validateAlg'],
-        ];
-    }
-
-    /**
-     * token类型验证器
+     * 验证属性格式
      *
-     * @param string $attribute
-     * @param mixed $params
+     * @return bool
      */
-    public function validateType($attribute, $params)
+    public function validate()
     {
-        if (!$this->hasErrors()) {
-            if ($this->type !== 'jwt') {
-                $this->addError($attribute, 'Token type error!');
-            }
+        $supportAlgos = hash_algos();
+        if ($this->type !== 'jwt' || !in_array($this->alg, $supportAlgos)) {
+            return false;
         }
+        return true;
     }
 
     /**
-     * token加密算法验证器
+     * jwt头部编码
      *
-     * @param string $attribute
-     * @param mixed $params
-     */
-    public function validateAlg($attribute, $params)
-    {
-        if (!$this->hasErrors()) {
-            $support_algos = hash_algos();
-            if (!in_array($this->alg, $support_algos)) {
-                $this->addError($attribute, 'Token encryption algorithm error!');
-            }
-        }
-    }
-
-    /**
-     * 编码头部
-     *
+     * @param bool $refresh
      * @return string
-     * @throws InvalidSegmentException
+     * @throws SegmentErrorException
      */
-    protected function encode()
+    public function encode($refresh = false)
     {
-        $heads = $this->attributes;
-
-        if (!$this->validate(array_keys($heads))) {
-            throw new InvalidSegmentException('Token type or encryption algorithm error!');
+        if (!$refresh && isset($this->encodeHead)) {
+            return $this->encodeHead;
         }
 
-        $this->encode_head = $this->encodeArray($heads);
+        if (!$this->validate()) {
+            throw new SegmentErrorException('Token type or encryption algorithm error!');
+        }
 
-        return $this->encode_head;
+        return $this->encodeHead = $this->encodeArray($this->properties());
     }
 
     /**
-     * 解码头部
+     * jwt头部解码
      *
-     * @return Head
+     * @param string $encodeHead
+     * @return Segment
      * @throws TokenInvalidException
      */
-    protected function decode()
+    public function decode($encodeHead)
     {
-        $heads = $this->decodeString($this->encode_head);
-
+        $heads = $this->decodeString($this->encodeHead = $encodeHead);
         if (!is_array($heads)) {
             throw new TokenInvalidException('Token type or encryption algorithm error!');
         }
 
-        Yii::configure($this, $heads);
-
-        if (!$this->validate(array_keys($this->attributes))) {
+        $this->configure($heads);
+        if (!$this->validate()) {
             throw new TokenInvalidException('Token type or encryption algorithm error!');
         }
 
         return $this;
-    }
-
-    /**
-     * 刷新头部
-     *
-     * @return string
-     * @throws InvalidSegmentException
-     */
-    public function refresh()
-    {
-        return $this->encode();
-    }
-
-    /**
-     * @return string
-     * @throws InvalidSegmentException
-     */
-    public function getEncodeHead()
-    {
-        if (!isset($this->encode_head)) {
-            $this->refresh();
-        }
-        return $this->encode_head;
-    }
-
-    /**
-     * @param $encode_head
-     * @return Head
-     * @throws TokenInvalidException
-     */
-    public function setEncodeHead($encode_head)
-    {
-        $this->encode_head = $encode_head;
-        return $this->decode();
     }
 }

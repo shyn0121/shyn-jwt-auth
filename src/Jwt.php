@@ -2,12 +2,12 @@
 
 namespace JwtAuth;
 
-use yii\base\UnknownPropertyException;
+use JwtAuth\Exceptions\SegmentErrorException;
 use JwtAuth\Exceptions\TokenExpiredException;
 use JwtAuth\Exceptions\TokenInvalidException;
-use JwtAuth\Exceptions\InvalidSegmentException;
+use JwtAuth\Exceptions\UnknownPropertyException;
 
-class Jwt extends BaseModel
+class Jwt extends Segment
 {
     /**
      * @var Head token头部
@@ -36,93 +36,97 @@ class Jwt extends BaseModel
 
     /**
      * Jwt constructor.
+     *
      * @param string $salt
-     * @param array $config
      */
-    public function __construct($salt, array $config = [])
+    public function __construct($salt)
     {
-        parent::__construct($config);
-
         $this->salt = $salt;
     }
 
     /**
-     * 访问头部或载荷属性
+     * 属性格式验证
      *
-     * @param string $name
-     * @return mixed
+     * @return bool
      */
-    public function __get($name)
+    public function validate()
     {
-        try {
-            return parent::__get($name);
-        } catch (UnknownPropertyException $ex) {
-            if ($name === 'type' || $name === 'alg' || $name === 'encodeHead') {
-                return $this->head->$name;
-            } else {
-                return $this->payload->$name;
-            }
+        if (!$this->head instanceof Head || !$this->payload instanceof Payload) {
+            return false;
         }
+        return true;
     }
 
     /**
-     * 设置头部或载荷属性
+     * jwt编码
      *
-     * @param string $name
-     * @param mixed $value
-     */
-    public function __set($name, $value)
-    {
-        try {
-            parent::__set($name, $value);
-        } catch (UnknownPropertyException $ex) {
-            if ($name === 'type' || $name === 'alg' || $name === 'encodeHead') {
-                $this->head->$name = $value;
-            } else {
-                $this->payload->$name = $value;
-            }
-        }
-    }
-
-    /**
+     * @param bool $refresh
      * @return string
      */
-    public function __toString()
+    public function encode($refresh = false)
     {
-        return $this->token;
-    }
-
-    /**
-     * @return array
-     */
-    public function rules()
-    {
-        return [
-            [['head', 'payload'], 'required'],
-            [['head', 'payload'], 'validateInstance']
-        ];
-    }
-
-    /**
-     * 头部和载荷类型验证器
-     *
-     * @param string $attribute
-     * @param mixed $params
-     */
-    public function validateInstance($attribute, $params)
-    {
-        if (!$this->hasErrors()) {
-            $class_name = 'JwtAuth\\' . ucfirst($attribute);
-
-            if (!$this->$attribute instanceof $class_name) {
-                $this->addError($attribute, 'token ' . $attribute . ' error!');
-            }
+        if (!$refresh && isset($this->token)) {
+            return $this->token;
         }
+
+        if (!$this->validate()) {
+            throw new SegmentErrorException('Token header or payload error!');
+        }
+        $entity = $this->entity($refresh);
+        $this->signature = $this->sign($entity);
+
+        return $this->token = $entity . '.' . $this->signature;
+    }
+
+    /**
+     * jwt解码
+     *
+     * @param string $token
+     * @return Segment
+     * @throws TokenInvalidException
+     */
+    public function decode($token)
+    {
+        $this->token = $token;
+        $this->verifyToken();
+
+        $this->head = new Head();
+        $this->payload = new Payload();
+        list($encodeHead, $encodePayload, $this->signature) = explode('.', $this->token);
+
+        $this->head->decode($encodeHead);
+        $this->payload->decode($encodePayload);
+
+        return $this;
+    }
+
+    /**
+     * jwt实体编码
+     *
+     * @param bool $refresh
+     * @return string
+     * @throws SegmentErrorException
+     */
+    private function entity($refresh = false)
+    {
+        return $this->head->encode($refresh) . '.' . $this->payload->encode($refresh);
+    }
+
+    /**
+     * jwt签名
+     *
+     * @param string $entity
+     * @return string
+     */
+    private function sign($entity)
+    {
+        return hash($this->head->alg, $entity . $this->salt);
     }
 
     /**
      * 验证token格式
      *
+     * @return bool
      * @throws TokenInvalidException
      */
     public function verifyToken()
@@ -130,27 +134,64 @@ class Jwt extends BaseModel
         if (!is_string($this->token)) {
             throw new TokenInvalidException('Token format error!');
         }
+
         if (count(explode('.', $this->token)) !== 3) {
             throw new TokenInvalidException('Token format error!');
         }
+
+        return true;
+    }
+
+    /**
+     * 解析token
+     *
+     * @param string $token
+     * @param int $refreshTtl
+     * @return bool
+     * @throws TokenExpiredException
+     * @throws TokenInvalidException
+     */
+    public function parseToken($token, $refreshTtl)
+    {
+        $this->decode($token);
+
+        return $this->verifySignature() && $this->verifyNotBeforeTime()
+            && $this->verifyRefreshTime($refreshTtl) && $this->verifyExpiredTime();
+
+    }
+
+    /**
+     * 解析token，并判断token是否可刷新
+     *
+     * @param string $token
+     * @param int $refreshTtl
+     * @return bool
+     * @throws TokenInvalidException
+     */
+    public function parseRefreshToken($token, $refreshTtl)
+    {
+        try {
+            $this->parseToken($token, $refreshTtl);
+        } catch (TokenExpiredException $ex) {
+
+        }
+        return true;
     }
 
     /**
      * 验证token签名
      *
      * @return bool
+     * @throws SegmentErrorException
      * @throws TokenInvalidException
      */
     public function verifySignature()
     {
-        $entity = $this->encodeHead . '.' . $this->encodePayload;
-
-        $verified_signature = $this->sign($this->alg, $entity, $this->salt);
-
-        if ($verified_signature !== $this->signature) {
+        $entity = $this->entity();
+        $signature = $this->sign($entity);
+        if ($signature !== $this->signature) {
             throw new TokenInvalidException('Token signature error!');
         }
-
         return true;
     }
 
@@ -162,7 +203,7 @@ class Jwt extends BaseModel
      */
     public function verifyExpiredTime()
     {
-        if (Timer::isPast($this->exp)) {
+        if (Timer::isPast($this->payload->exp)) {
             throw new TokenExpiredException('Token has expired!');
         }
         return true;
@@ -176,8 +217,8 @@ class Jwt extends BaseModel
      */
     public function verifyNotBeforeTime()
     {
-        if (!Timer::isNowOrPast($this->nbf)) {
-            throw new TokenInvalidException('Token can not be used before nbf time!');
+        if (!Timer::isNowOrPast($this->payload->nbf)) {
+            throw new TokenInvalidException('Token can not be used so far!');
         }
         return true;
     }
@@ -185,134 +226,14 @@ class Jwt extends BaseModel
     /**
      * 验证token刷新时间
      *
-     * @param $refresh_ttl
+     * @param int $refreshTtl
      * @return bool
      * @throws TokenInvalidException
      */
-    public function verifyRefreshTime($refresh_ttl)
+    public function verifyRefreshTime($refreshTtl)
     {
-        if (Timer::isPastSeconds($this->iat, $refresh_ttl)) {
+        if (Timer::isPastSeconds($this->payload->iat, $refreshTtl)) {
             throw new TokenInvalidException('Token can not be refreshed!');
-        }
-        return true;
-    }
-
-    /**
-     * 编码token
-     *
-     * @return string
-     * @throws InvalidSegmentException
-     */
-    protected function encode()
-    {
-        if (!$this->validate(array_keys($this->attributes))) {
-            throw new InvalidSegmentException('Token header or payload error!');
-        }
-
-        $entity = $this->encodeHead . '.' . $this->encodePayload;
-        $signature = $this->sign($this->alg, $entity, $this->salt);
-
-        $this->token = $entity . '.' . $signature;
-        $this->signature = $signature;
-
-        return $this->token;
-    }
-
-    /**
-     * 解码token
-     *
-     * @return Jwt
-     * @throws TokenInvalidException
-     */
-    protected function decode()
-    {
-        $this->verifyToken();
-
-        list($encode_head, $encode_payload, $signature) = explode('.', $this->token);
-
-        $this->head = new Head();
-        $this->encodeHead = $encode_head;
-
-        $this->payload = new PayLoad();
-        $this->encodePayload = $encode_payload;
-
-        $this->signature = $signature;
-
-        return $this;
-    }
-
-    /**
-     * 刷新token
-     *
-     * @return string
-     * @throws InvalidSegmentException
-     */
-    public function refresh()
-    {
-        $this->head->refresh();
-        $this->payload->refresh();
-
-        return $this->encode();
-    }
-
-    /**
-     * @return string
-     * @throws InvalidSegmentException
-     */
-    public function getToken()
-    {
-        if (!isset($this->token)) {
-            $this->refresh();
-        }
-        return $this->token;
-    }
-
-    /**
-     * @param string $token
-     * @return Jwt
-     * @throws TokenInvalidException
-     */
-    public function setToken($token)
-    {
-        $this->token = $token;
-        return $this->decode();
-    }
-
-    /**
-     * 解析token
-     *
-     * @param null|string $token
-     * @param int $refresh_ttl
-     * @return Jwt
-     * @throws TokenExpiredException
-     * @throws TokenInvalidException
-     */
-    public function parseToken($token = null, $refresh_ttl = 0)
-    {
-        if (isset($token)) {
-            $this->setToken($token);
-        }
-
-        if ($this->verifySignature() && $this->verifyNotBeforeTime()
-            && $this->verifyRefreshTime($refresh_ttl) && $this->verifyExpiredTime()) {
-            return $this;
-        }
-    }
-
-    /**
-     * 解析token，并判断token是否可刷新
-     *
-     * @param null|string $token
-     * @param $refresh_ttl
-     * @return bool
-     * @throws TokenInvalidException
-     */
-    public function parseRefreshToken($token = null, $refresh_ttl = 0)
-    {
-        try {
-            $this->parseToken($token, $refresh_ttl);
-        } catch (TokenExpiredException $ex) {
-
         }
         return true;
     }

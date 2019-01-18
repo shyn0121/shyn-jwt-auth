@@ -3,21 +3,21 @@
 namespace JwtAuth;
 
 use Yii;
-use yii\base\BaseObject;
-use yii\web\UnauthorizedHttpException;
 use JwtAuth\Exceptions\TokenInvalidException;
+use JwtAuth\Exceptions\UserNotFoundException;
+use JwtAuth\Exceptions\UserUnauthorizedException;
 
-class Auth extends BaseObject
+class Auth
 {
     /**
-     * @var string token token字符串
+     * @var string
      */
-    private $_token;
+    public $token;
 
     /**
-     * @var IdentityInterface 认证用户实例
+     * @var UserAuthInterface
      */
-    private $_identify;
+    public $user;
 
     /**
      * @var Manager
@@ -36,130 +36,123 @@ class Auth extends BaseObject
 
     /**
      * Auth constructor.
-     * @param array $config
      */
-    public function __construct($config = [])
+    public function __construct()
     {
-        parent::__construct($config);
-
+        $this->manager = Yii::$app->jwtManager;
         $this->request = Yii::$app->request;
         $this->response = Yii::$app->response;
-        $this->manager = Yii::$app->jwtManager;
     }
 
     /**
-     * 登录认证
+     * 用户登录认证
      *
-     * @return IdentityInterface
-     * @throws UnauthorizedHttpException
+     * @return UserAuthInterface
+     * @throws UserUnauthorizedException
      */
     public function login()
     {
-        $identify_class = $this->manager->identifyClass;
-        $identify = $identify_class::findIdentityFromRequest($this->request);
-        if (!isset($identify) || $identify === false || !($identify instanceof IdentityInterface)) {
-            throw new UnauthorizedHttpException('Identify user failed!');
+        $userClass = $this->manager->userClass;
+        $user = $userClass::getUserByRequest($this->request);
+        if (!isset($user) || $user === false || !($user instanceof UserAuthInterface)) {
+            throw new UserUnauthorizedException('User name or password error!');
         }
-
-        $this->registerIdentify($identify);
-        return $this->_identify;
+        return $this->registerUser($user);
     }
 
     /**
-     * 通过用户唯一标志获取用户
+     * 通过用户唯一标识创建用户实例
      *
-     * @param string|int $id
-     * @return IdentityInterface
-     * @throws UnauthorizedHttpException
+     * @param int|string $id
+     * @return UserAuthInterface
+     * @throws UserNotFoundException
      */
-    public function getIdentityById($id)
+    public function getUserById($id)
     {
-        $identify_class = $this->manager->identifyClass;
-        $identify = $identify_class::findIdentityById($id);
-        if (!isset($identify) || $identify === false || !($identify instanceof IdentityInterface)) {
-            throw new UnauthorizedHttpException('Identify user failed!');
+        $userClass = $this->manager->userClass;
+        $user = $userClass::getUserById($id);
+        if (!isset($user) || $user === false || !($user instanceof UserAuthInterface)) {
+            throw new UserNotFoundException('User not be found!');
         }
-
-        $this->registerIdentify($identify);
-        return $this->_identify;
+        return $this->registerUser($user);
     }
 
     /**
-     * 通过用户唯一标志获取用户并配置用户信息
+     * 通过用户唯一标识创建用户实例并附加自定义载荷和白名单
      *
-     * @param string|int $id
-     * @param array $custom_claims
+     * @param int|string $id
+     * @param array $customClaims
      * @param array $content
-     * @return IdentityInterface
-     * @throws UnauthorizedHttpException
+     * @return UserAuthInterface
+     * @throws UserNotFoundException
      */
-    public function configureIdentityById($id, $custom_claims, $content)
+    public function configureUserById($id, $customClaims, $content)
     {
-        $identify = $this->getIdentityById($id);
-        $identify->customClaims = $custom_claims;
-        $identify->content = $content;
-        return $identify;
+        $user = $this->getUserById($id);
+        $user->fillCustomClaims($customClaims);
+        $user->fillContent($content);
+
+        return $user;
     }
 
     /**
-     * 从请求中获取token
+     * 注册用户实例到应用
+     *
+     * @param UserAuthInterface $user
+     * @return UserAuthInterface
+     */
+    private function registerUser($user)
+    {
+        return $this->user = $user;
+    }
+
+    /**
+     * 从客户端请求中获取token
      *
      * @return string
      * @throws TokenInvalidException
      */
-    private function fetchTokenFromRequest()
+    public function fetchTokenFromRequest()
     {
         $token = $this->request->getQueryParam('token');
         if (isset($token)) {
-            return $this->_token = $token;
+            return $token;
         }
 
         $headers = $this->request->getHeaders();
         if (isset($headers['Authorization'])) {
-            if (strpos($headers['Authorization'], 'Bearer') !== false) {
-                $token = explode(' ', $headers['Authorization']);
-                if (count($token) == 2) {
-                    return $this->_token = $token[1];
-                }
+            $position = strpos($headers['Authorization'], 'Bearer ');
+            if ($position !== false) {
+                return substr($headers['Authorization'], $position + 7);
             }
         }
 
         $token = $this->request->getBodyParam('token');
         if (isset($token)) {
-            return $this->_token = $token;
+            return $token;
         }
 
         $raw = $this->request->getRawBody();
         if ($data = json_decode($raw, true)) {
             if (isset($data['token'])) {
-                return $this->_token = $data['token'];
+                return $data['token'];
             }
         }
 
-        throw new TokenInvalidException('Token can not be fetched from request!');
+        throw new TokenInvalidException('Token can not be found!');
     }
 
     /**
-     * 注册identify到auth
-     *
-     * @param $identify
-     */
-    private function registerIdentify($identify)
-    {
-        $this->_identify = $identify;
-    }
-
-    /**
-     * 把token添加到http响应头部
+     * 添加token到http响应头
      */
     public function addTokenToResponse()
     {
         $this->response->getHeaders()
-            ->set('Authorization', 'Bearer ' . $this->token);
+            ->set('Authorization', 'Bearer ' . $this->token());
     }
 
     /**
-     * 把token从http响应头部删除
+     * 从http响应头删除token
      */
     public function removeTokenFromResponse()
     {
@@ -171,31 +164,23 @@ class Auth extends BaseObject
      * @return string
      * @throws TokenInvalidException
      */
-    public function getToken()
+    public function token()
     {
-        if (!isset($this->_token)) {
-            $this->fetchTokenFromRequest();
+        if (!isset($this->token)) {
+            $this->token = $this->fetchTokenFromRequest();
         }
-        return $this->_token;
+        return $this->token;
     }
 
     /**
-     * @param string $token
+     * @return UserAuthInterface
+     * @throws UserUnauthorizedException
      */
-    public function setToken($token)
+    public function user()
     {
-        $this->_token = $token;
-    }
-
-    /**
-     * @return IdentityInterface
-     * @throws UnauthorizedHttpException
-     */
-    public function getIdentify()
-    {
-        if (!isset($this->_identify)) {
+        if (!isset($this->user)) {
             $this->login();
         }
-        return $this->_identify;
+        return $this->user;
     }
 }

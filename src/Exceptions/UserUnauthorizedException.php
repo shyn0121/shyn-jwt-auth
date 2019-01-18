@@ -2,7 +2,7 @@
 
 namespace JwtAuth\Exceptions;
 
-class TokenInvalidException extends JwtException
+class UserUnauthorizedException extends JwtException
 {
     /**
      * @var int http状态码

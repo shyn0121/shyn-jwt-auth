@@ -3,14 +3,14 @@
 namespace JwtAuth\Models;
 
 use yii\db\ActiveRecord;
-use JwtAuth\IdentityInterface;
+use JwtAuth\UserAuthInterface;
 
-abstract class AbstractIdentityRecord extends ActiveRecord implements IdentityInterface
+abstract class AbstractIdentityRecord extends ActiveRecord implements UserAuthInterface
 {
     /**
      * @var array 自定义载荷
      */
-    private $custom_claims = [];
+    private $customClaims = [];
 
     /**
      * @var array 白名单内容
@@ -18,43 +18,38 @@ abstract class AbstractIdentityRecord extends ActiveRecord implements IdentityIn
     private $content = [];
 
     /**
-     * @var bool
+     * @param array $customClaims
      */
-    private $has_custom_claims = false;
+    public function fillCustomClaims($customClaims)
+    {
+        $this->customClaims = $customClaims;
+    }
 
     /**
-     * @var bool
+     * @param array $content
      */
-    private $has_content = false;
-
-    /**
-     * @return array 创建用户自定义载荷
-     */
-    abstract public function genCustomClaims();
-
-    /**
-     * @return array 创建白名单内容
-     */
-    abstract public function genContent();
+    public function fillContent($content)
+    {
+        $this->content = $content;
+    }
 
     /**
      * @return array
      */
     public function getCustomClaims()
     {
-        if ($this->has_custom_claims) {
-            return $this->custom_claims;
+        if (!isset($this->customClaims)) {
+            $this->customClaims = $this->genCustomClaims();
         }
-        return $this->genCustomClaims();
+        return $this->customClaims;
     }
 
     /**
-     * @param array $custom_claims
+     * @param array $customClaims
      */
-    public function setCustomClaims($custom_claims)
+    public function setCustomClaims($customClaims)
     {
-        $this->custom_claims = $custom_claims;
-        $this->markCustomClaims();
+        $this->customClaims = $customClaims;
     }
 
     /**
@@ -62,10 +57,10 @@ abstract class AbstractIdentityRecord extends ActiveRecord implements IdentityIn
      */
     public function getContent()
     {
-        if ($this->has_content) {
-            return $this->content;
+        if (!isset($this->content)) {
+            $this->content = $this->content();
         }
-        return $this->genContent();
+        return $this->content;
     }
 
     /**
@@ -74,22 +69,5 @@ abstract class AbstractIdentityRecord extends ActiveRecord implements IdentityIn
     public function setContent($content)
     {
         $this->content = $content;
-        $this->markContent();
-    }
-
-    /**
-     *
-     */
-    private function markCustomClaims()
-    {
-        $this->has_custom_claims = true;
-    }
-
-    /**
-     *
-     */
-    private function markContent()
-    {
-        $this->has_content = true;
     }
 }

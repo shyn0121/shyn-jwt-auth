@@ -2,10 +2,7 @@
 
 namespace JwtAuth\Exceptions;
 
-class TokenExpiredException extends JwtException
+class TokenExpiredException extends TokenInvalidException
 {
-    /**
-     * @var int
-     */
-    protected $statusCode = 401;
+
 }

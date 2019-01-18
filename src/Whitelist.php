@@ -2,12 +2,12 @@
 
 namespace JwtAuth;
 
-class WhiteList extends BaseList
+class Whitelist extends Cache
 {
     /**
      * 缓存键值前缀
      */
-    const WHITE_LIST_PREFIX = 'jwt-wl-';
+    const WHITE_LIST_PREFIX = 'jwt-whitelist-';
 
     /**
      * 序列化key值

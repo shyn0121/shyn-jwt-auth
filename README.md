@@ -7,9 +7,9 @@
     'components' => [
         'jwtManager' => [
             'class' => 'JwtAuth\Manager',
-            'identifyClass' => 'app\models\User',
-            'whiteListEnable' => true,
-            'blackListEnable' => false,
+            'userClass' => 'app\models\User',
+            'whitelistEnable' => true,
+            'blacklistEnable' => false,
             'salt' => 'L3AeVgpV70I9HouNFd06bYjmdG7bFE4F',
             'ttl' => 20,
             'refreshTtl' => 40,
@@ -25,9 +25,9 @@
     ]
 ```
 1. 如果没有配置cache，默认使用 `Yii::$app->cache`。或cache配置为`'cache'=>'redisCache'`则使用`Yii::$app->redisCache`。
-2. identifyClass指定的类需要实现JwtAuth\IdentityInterface接口。
-3. ttl为token有效时长，refreshTtl为token刷新有效时长，若想禁用token刷新机制，可设置refreshTtl大于ttl。单位：秒。
-4. salt为token的加密秘钥。
+2. `userClass`指定的类需要实现`JwtAuth\UserAuthInterface`接口。
+3. `ttl`为token有效时长，`refreshTtl`为token刷新有效时长，若想禁用token刷新机制，可设置`refreshTtl`大于`ttl`。单位：秒。
+4. `salt`为token的加密秘钥。
 
 ## 生成token
 ``` php
@@ -59,80 +59,18 @@
         return 'successfully!';
     }
 ```
-## User示例
+
+## 获取token认证后的用户实例
 ``` php
-<?php
-
-namespace app\models;
-
-use yii\base\Model;
-use JwtAuth\IdentityInterface;
-
-class User extends Model implements IdentityInterface
-{
-    public $id;
-    public $name;
-    public $password;
-    public $email;
-    private $custom_claims;
-    private $content;
-
-    public static function findIdentityById($id)
+    public function actionUser()
     {
-        $user = new User();
-        $user->id = 1;
-        $user->name = 'yyliziqiu';
-        $user->password = '123456';
-        $user->email = 'yyliziqiu@163.com';
-
-        return $user;
+        $user = $identify=Yii::$app->jwtManager->user();
+        
+        return $user->name;
     }
-
-    public static function findIdentityFromRequest($request)
-    {
-        $user = new User();
-        $user->id = 1;
-        $user->name = 'yyliziqiu';
-        $user->password = '123456';
-        $user->email = 'yyliziqiu@163.com';
-
-        return $user;
-    }
-
-    public function getId()
-    {
-        return $this->id;
-    }
-
-    public function getCustomClaims()
-    {
-        if (isset($this->custom_claims)) {
-            return $this->custom_claims;
-        }
-        return ['name' => 'yyliziqiu', 'aud' => 'phone'];
-    }
-
-    public function setCustomClaims($custom_claims)
-    {
-
-        $this->custom_claims = $custom_claims;
-    }
-
-    public function getContent()
-    {
-        if (isset($this->content)) {
-            return $this->content;
-        }
-        return ['address' => 'hb'];
-    }
-
-    public function setContent($content)
-    {
-        $this->content = $content;
-    }
-}
 ```
-或
+
+## User示例
 ``` php
 <?php
 
@@ -147,9 +85,9 @@ class User extends AbstractIdentityModel
     public $password;
     public $email;
 
-    public static function findIdentityById($id)
+    public static function getUserById($id)
     {
-        $user = new JWTUser();
+        $user = new User();
         $user->id = 1;
         $user->name = 'yyliziqiu';
         $user->password = '123456';
@@ -158,9 +96,9 @@ class User extends AbstractIdentityModel
         return $user;
     }
 
-    public static function findIdentityFromRequest($request)
+    public static function getUserByRequest($request)
     {
-        $user = new JWTUser();
+        $user = new User();
         $user->id = 1;
         $user->name = 'yyliziqiu';
         $user->password = '123456';
@@ -181,7 +119,7 @@ class User extends AbstractIdentityModel
 
     public function genContent()
     {
-        return ['address' => 'hb'];
+        return ['address' => 'Hebei'];
     }
 }
 ```
