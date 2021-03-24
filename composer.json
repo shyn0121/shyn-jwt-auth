@@ -1,5 +1,5 @@
 {
-    "name": "yyliziqiu/jwt-auth",
+    "name": "shyn/jwt-auth",
     "description": "JSON Web Token Authentication for yii2",
     "type": "library",
     "keywords": [
@@ -8,7 +8,7 @@
     "license": "MIT",
     "authors": [
         {
-            "name": "yyliziqiu"
+            "name": "shyn"
         }
     ],
     "require": {
